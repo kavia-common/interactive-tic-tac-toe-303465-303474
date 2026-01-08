@@ -107,6 +107,45 @@ function Board({ squares, onPlayAt, winningLine, disabled }) {
   );
 }
 
+const TONE_OPTIONS = ["Playful", "Competitive", "Snarky", "Encouraging"];
+const FREQUENCY_OPTIONS = [
+  "Key events only (win/draw)",
+  "Every 2 moves",
+  "Every move",
+];
+
+function normalizeTone(value) {
+  if (!value || typeof value !== "string") return "Playful";
+  return TONE_OPTIONS.includes(value) ? value : "Playful";
+}
+
+function normalizeFrequency(value) {
+  if (!value || typeof value !== "string") return "Every move";
+  return FREQUENCY_OPTIONS.includes(value) ? value : "Every move";
+}
+
+/**
+ * Decide if trash talk should trigger for the given event based on frequency setting.
+ * @param {string} frequency
+ * @param {"move"|"win"|"draw"} event
+ * @param {number} moveCountAfterThisMove  Number of valid moves committed so far (after applying current move).
+ * @returns {boolean}
+ */
+function shouldTriggerTrashTalk(frequency, event, moveCountAfterThisMove) {
+  const freq = normalizeFrequency(frequency);
+
+  if (event === "win" || event === "draw") return true;
+
+  // event === "move"
+  if (freq === "Key events only (win/draw)") return false;
+  if (freq === "Every move") return true;
+
+  // Every 2 moves: trigger on even move counts (2,4,6,8,...)
+  if (freq === "Every 2 moves") return moveCountAfterThisMove % 2 === 0;
+
+  return true;
+}
+
 // PUBLIC_INTERFACE
 function App() {
   /**
@@ -128,6 +167,27 @@ function App() {
       return true;
     }
   });
+
+  const [trashTalkTone, setTrashTalkTone] = useState(() => {
+    try {
+      // Backwards compatibility: missing key defaults to Playful.
+      const saved = window.localStorage.getItem("tt_tone");
+      return normalizeTone(saved || "Playful");
+    } catch {
+      return "Playful";
+    }
+  });
+
+  const [trashTalkFrequency, setTrashTalkFrequency] = useState(() => {
+    try {
+      // Backwards compatibility: missing key defaults to Every move.
+      const saved = window.localStorage.getItem("tt_frequency");
+      return normalizeFrequency(saved || "Every move");
+    } catch {
+      return "Every move";
+    }
+  });
+
   const [trashTalkText, setTrashTalkText] = useState("");
   const [trashTalkLoading, setTrashTalkLoading] = useState(false);
 
@@ -159,6 +219,22 @@ function App() {
       // ignore
     }
   }, [trashTalkEnabled]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("tt_tone", String(trashTalkTone));
+    } catch {
+      // ignore
+    }
+  }, [trashTalkTone]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("tt_frequency", String(trashTalkFrequency));
+    } catch {
+      // ignore
+    }
+  }, [trashTalkFrequency]);
 
   function clearDebounce() {
     if (debounceTimerRef.current) {
@@ -238,14 +314,26 @@ function App() {
     setStepNumber(nextHistory.length);
     setXIsNext((prev) => !prev);
 
-    // Request trash talk for the moment (move/win/draw).
+    // Decide whether to trigger based on frequency (and avoid spamming).
     const event = nextWinner ? "win" : nextIsDraw ? "draw" : "move";
+    const moveCountAfterThisMove = nextHistory.length; // after appending, this becomes the move count
+    const okToTrigger = shouldTriggerTrashTalk(
+      trashTalkFrequency,
+      event,
+      moveCountAfterThisMove
+    );
+
+    if (!okToTrigger) return;
+
+    // Request trash talk for the moment.
     requestTrashTalk({
       boardState: nextSquares,
       currentPlayer: nextWinner || nextIsDraw ? currentPlayer : xIsNext ? "O" : "X",
       lastMoveIndex: idx,
       event,
       winner: nextWinner || undefined,
+      tone: trashTalkTone,
+      frequency: trashTalkFrequency,
     });
   }
 
@@ -289,6 +377,7 @@ function App() {
               .join(" ")}
             onClick={() => handleJumpTo(moveIdx)}
             aria-current={isCurrent ? "step" : undefined}
+            aria-label={desc}
           >
             {moveIdx === 0 ? "Start" : `Move #${moveIdx}`}
             {moveIdx !== 0 && (
@@ -357,6 +446,10 @@ function App() {
                 onToggle={setTrashTalkEnabled}
                 text={trashTalkText}
                 loading={trashTalkLoading}
+                tone={trashTalkTone}
+                onToneChange={(t) => setTrashTalkTone(normalizeTone(t))}
+                frequency={trashTalkFrequency}
+                onFrequencyChange={(f) => setTrashTalkFrequency(normalizeFrequency(f))}
               />
 
               <div className="ttt-actions">

@@ -1,17 +1,43 @@
 import React, { useEffect, useMemo, useState } from "react";
 import TrashTalkToggle from "./TrashTalkToggle";
 
+const TONE_OPTIONS = [
+  { value: "Playful", label: "Playful" },
+  { value: "Competitive", label: "Competitive" },
+  { value: "Snarky", label: "Snarky" },
+  { value: "Encouraging", label: "Encouraging" },
+];
+
+const FREQ_OPTIONS = [
+  { value: "Key events only (win/draw)", label: "Key events only" },
+  { value: "Every 2 moves", label: "Every 2 moves" },
+  { value: "Every move", label: "Every move" },
+];
+
 /**
  * PUBLIC_INTERFACE
- * Animated panel that displays the latest trash talk line.
+ * Animated panel that displays the latest trash talk line + compact settings.
  * @param {{
  *  enabled: boolean,
  *  onToggle: (enabled: boolean) => void,
  *  text: string,
- *  loading: boolean
+ *  loading: boolean,
+ *  tone: string,
+ *  onToneChange: (tone: string) => void,
+ *  frequency: string,
+ *  onFrequencyChange: (freq: string) => void
  * }} props
  */
-export default function TrashTalkPanel({ enabled, onToggle, text, loading }) {
+export default function TrashTalkPanel({
+  enabled,
+  onToggle,
+  text,
+  loading,
+  tone,
+  onToneChange,
+  frequency,
+  onFrequencyChange,
+}) {
   const [animateKey, setAnimateKey] = useState(0);
 
   useEffect(() => {
@@ -24,6 +50,16 @@ export default function TrashTalkPanel({ enabled, onToggle, text, loading }) {
     if (!enabled) return "Trash talk is off. (Quiet confidence mode.)";
     return text || "Make a move and I’ll have something to say.";
   }, [enabled, loading, text]);
+
+  const note = useMemo(() => {
+    const toneLabel =
+      TONE_OPTIONS.find((o) => o.value === tone)?.label || "Playful";
+    const freqLabel =
+      FREQ_OPTIONS.find((o) => o.value === frequency)?.label || "Every move";
+
+    if (!enabled) return "Enable it for cheeky commentary after moves, wins, and draws.";
+    return `PG-rated, friendly. Tone: ${toneLabel}. Frequency: ${freqLabel}.`;
+  }, [enabled, tone, frequency]);
 
   return (
     <section className="ttt-tt-panel" aria-label="Trash talk">
@@ -77,7 +113,41 @@ export default function TrashTalkPanel({ enabled, onToggle, text, loading }) {
           <span className="ttt-tt-panel__accent" aria-hidden="true" />
         </div>
 
-        <TrashTalkToggle enabled={enabled} onChange={onToggle} />
+        <div className="ttt-tt-panel__controls" aria-label="Trash talk settings">
+          <label className="ttt-tt-select" aria-label="Trash talk tone">
+            <span className="ttt-tt-select__label">Tone</span>
+            <select
+              className="ttt-tt-select__control"
+              value={tone}
+              onChange={(e) => onToneChange(e.target.value)}
+              disabled={!enabled}
+            >
+              {TONE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="ttt-tt-select" aria-label="Trash talk frequency">
+            <span className="ttt-tt-select__label">Freq</span>
+            <select
+              className="ttt-tt-select__control"
+              value={frequency}
+              onChange={(e) => onFrequencyChange(e.target.value)}
+              disabled={!enabled}
+            >
+              {FREQ_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <TrashTalkToggle enabled={enabled} onChange={onToggle} />
+        </div>
       </div>
 
       <div
@@ -99,11 +169,7 @@ export default function TrashTalkPanel({ enabled, onToggle, text, loading }) {
             <p className="ttt-tt-panel__text">{display}</p>
           )}
         </div>
-        <p className="ttt-tt-panel__note">
-          {enabled
-            ? "PG-rated, playful commentary."
-            : "Enable it for cheeky commentary after moves, wins, and draws."}
-        </p>
+        <p className="ttt-tt-panel__note">{note}</p>
       </div>
     </section>
   );
