@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import TrashTalkPanel from "./components/TrashTalkPanel";
+import { generateTrashTalk } from "./services/trashTalkService";
 
 /**
  * All winning line combinations (by index in a 0..8 3x3 board).
@@ -117,6 +119,22 @@ function App() {
   const [stepNumber, setStepNumber] = useState(0);
   const [xIsNext, setXIsNext] = useState(true);
 
+  // Trash talk settings + UI state
+  const [trashTalkEnabled, setTrashTalkEnabled] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem("tt_trash_talk_enabled");
+      return saved === null ? true : saved === "true";
+    } catch {
+      return true;
+    }
+  });
+  const [trashTalkText, setTrashTalkText] = useState("");
+  const [trashTalkLoading, setTrashTalkLoading] = useState(false);
+
+  // Debounce + stale-response protection
+  const debounceTimerRef = useRef(null);
+  const requestIdRef = useRef(0);
+
   const current = history[stepNumber];
   const { winner, line: winningLine } = useMemo(
     () => calculateWinner(current.squares),
@@ -130,6 +148,55 @@ function App() {
 
   const currentPlayer = xIsNext ? "X" : "O";
   const gameOver = Boolean(winner) || isDraw;
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "tt_trash_talk_enabled",
+        String(trashTalkEnabled)
+      );
+    } catch {
+      // ignore
+    }
+  }, [trashTalkEnabled]);
+
+  function clearDebounce() {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+  }
+
+  // PUBLIC_INTERFACE
+  function requestTrashTalk(context) {
+    // No calls if disabled
+    if (!trashTalkEnabled) return;
+
+    // Debounce within 250ms
+    clearDebounce();
+
+    setTrashTalkLoading(true);
+    const myRequestId = ++requestIdRef.current;
+
+    debounceTimerRef.current = setTimeout(async () => {
+      try {
+        const line = await generateTrashTalk(context);
+        // Only apply if no newer request has been issued.
+        if (requestIdRef.current === myRequestId) {
+          setTrashTalkText(line);
+        }
+      } finally {
+        if (requestIdRef.current === myRequestId) {
+          setTrashTalkLoading(false);
+        }
+      }
+    }, 250);
+  }
+
+  useEffect(() => {
+    // Cleanup debounce on unmount
+    return () => clearDebounce();
+  }, []);
 
   // Scoreboard computed from the current end-state of the game.
   const score = useMemo(() => {
@@ -148,13 +215,19 @@ function App() {
   // PUBLIC_INTERFACE
   function handlePlayAt(idx) {
     if (gameOver) return;
-    if (current.squares[idx]) return;
+    if (current.squares[idx]) return; // invalid move => no API call
 
     // If user has time-traveled, discard future history
     const nextHistory = history.slice(0, stepNumber + 1);
     const nextSquares = current.squares.slice();
     nextSquares[idx] = currentPlayer;
 
+    // Compute end-state based on the move we are about to commit.
+    const nextResult = calculateWinner(nextSquares);
+    const nextWinner = nextResult.winner;
+    const nextIsDraw = !nextWinner && nextSquares.every((s) => s !== null);
+
+    // Update state
     setHistory([
       ...nextHistory,
       {
@@ -164,12 +237,26 @@ function App() {
     ]);
     setStepNumber(nextHistory.length);
     setXIsNext((prev) => !prev);
+
+    // Request trash talk for the moment (move/win/draw).
+    const event = nextWinner ? "win" : nextIsDraw ? "draw" : "move";
+    requestTrashTalk({
+      boardState: nextSquares,
+      currentPlayer: nextWinner || nextIsDraw ? currentPlayer : xIsNext ? "O" : "X",
+      lastMoveIndex: idx,
+      event,
+      winner: nextWinner || undefined,
+    });
   }
 
   // PUBLIC_INTERFACE
   function handleJumpTo(moveIndex) {
     setStepNumber(moveIndex);
     setXIsNext(moveIndex % 2 === 0);
+    // Clear pending talk and show something neutral.
+    clearDebounce();
+    setTrashTalkLoading(false);
+    setTrashTalkText("");
   }
 
   // PUBLIC_INTERFACE
@@ -177,6 +264,9 @@ function App() {
     setHistory([{ squares: emptyBoard(), lastMove: null }]);
     setStepNumber(0);
     setXIsNext(true);
+    clearDebounce();
+    setTrashTalkLoading(false);
+    setTrashTalkText("");
   }
 
   const moveButtons = useMemo(() => {
@@ -260,6 +350,13 @@ function App() {
                 onPlayAt={handlePlayAt}
                 winningLine={winningLine}
                 disabled={gameOver}
+              />
+
+              <TrashTalkPanel
+                enabled={trashTalkEnabled}
+                onToggle={setTrashTalkEnabled}
+                text={trashTalkText}
+                loading={trashTalkLoading}
               />
 
               <div className="ttt-actions">
